@@ -13,10 +13,16 @@ from math import log
 
 from . import frequency
 
-
 class TnT(object):
+    """
+    TnT - A Statistical Part of Speech Tagger
+    """
 
     def __init__(self, N=1000):
+        """
+        初始化TnT对象
+        :param N: 保留的最大候选路径数
+        """
         self.N = N
         self.l1 = 0.0
         self.l2 = 0.0
@@ -32,6 +38,11 @@ class TnT(object):
         self.trans = {}
 
     def save(self, fname, iszip=True):
+        """
+        保存模型到文件
+        :param fname: 文件名
+        :param iszip: 是否压缩
+        """
         d = {}
         for k, v in self.__dict__.items():
             if isinstance(v, set):
@@ -50,6 +61,11 @@ class TnT(object):
             f.close()
 
     def load(self, fname, iszip=True):
+        """
+        从文件加载模型
+        :param fname: 文件名
+        :param iszip: 是否压缩
+        """
         if sys.version_info[0] == 3:
             fname = fname + '.3'
         if not iszip:
@@ -71,17 +87,32 @@ class TnT(object):
                 self.__dict__[k] = v
 
     def tnt_div(self, v1, v2):
+        """
+        安全除法，避免除以零
+        :param v1: 分子
+        :param v2: 分母
+        :return: 结果
+        """
         if v2 == 0:
             return 0
-        return float(v1)/v2
+        return float(v1) / v2
 
     def geteos(self, tag):
+        """
+        获取句子结束标记的概率
+        :param tag: 词性标记
+        :return: 概率的对数值
+        """
         tmp = self.eosd.get(tag)
         if not tmp[0]:
-            return log(1.0/len(self.status))
-        return log(self.eos.get((tag, 'EOS'))[1])-log(self.eosd.get(tag)[1])
+            return log(1.0 / len(self.status))
+        return log(self.eos.get((tag, 'EOS'))[1]) - log(self.eosd.get(tag)[1])
 
     def train(self, data):
+        """
+        训练模型
+        :param data: 训练数据
+        """
         for sentence in data:
             now = ['BOS', 'BOS']
             self.bi.add(('BOS', 'BOS'), 1)
@@ -104,31 +135,32 @@ class TnT(object):
         tl2 = 0.0
         tl3 = 0.0
         for now in self.tri.samples():
-            c3 = self.tnt_div(self.tri.get(now)[1]-1,
-                              self.bi.get(now[:2])[1]-1)
-            c2 = self.tnt_div(self.bi.get(now[1:])[1]-1,
-                              self.uni.get(now[1])[1]-1)
-            c1 = self.tnt_div(self.uni.get(now[2])[1]-1, self.uni.getsum()-1)
+            c3 = self.tnt_div(self.tri.get(now)[1] - 1, self.bi.get(now[:2])[1] - 1)
+            c2 = self.tnt_div(self.bi.get(now[1:])[1] - 1, self.uni.get(now[1])[1] - 1)
+            c1 = self.tnt_div(self.uni.get(now[2])[1] - 1, self.uni.getsum() - 1)
             if c3 >= c1 and c3 >= c2:
                 tl3 += self.tri.get(now)[1]
             elif c2 >= c1 and c2 >= c3:
                 tl2 += self.tri.get(now)[1]
             elif c1 >= c2 and c1 >= c3:
                 tl1 += self.tri.get(now)[1]
-        self.l1 = float(tl1)/(tl1+tl2+tl3)
-        self.l2 = float(tl2)/(tl1+tl2+tl3)
-        self.l3 = float(tl3)/(tl1+tl2+tl3)
+        self.l1 = float(tl1) / (tl1 + tl2 + tl3)
+        self.l2 = float(tl2) / (tl1 + tl2 + tl3)
+        self.l3 = float(tl3) / (tl1 + tl2 + tl3)
         for s1 in self.status | set(('BOS',)):
             for s2 in self.status | set(('BOS',)):
                 for s3 in self.status:
-                    uni = self.l1*self.uni.freq(s3)
-                    bi = self.tnt_div(self.l2*self.bi.get((s2, s3))[1],
-                                      self.uni.get(s2)[1])
-                    tri = self.tnt_div(self.l3*self.tri.get((s1, s2, s3))[1],
-                                       self.bi.get((s1, s2))[1])
-                    self.trans[(s1, s2, s3)] = log(uni+bi+tri)
+                    uni = self.l1 * self.uni.freq(s3)
+                    bi = self.tnt_div(self.l2 * self.bi.get((s2, s3))[1], self.uni.get(s2)[1])
+                    tri = self.tnt_div(self.l3 * self.tri.get((s1, s2, s3))[1], self.bi.get((s1, s2))[1])
+                    self.trans[(s1, s2, s3)] = log(uni + bi + tri)
 
     def tag(self, data):
+        """
+        对输入数据进行词性标注
+        :param data: 输入数据
+        :return: 标注结果
+        """
         now = [(('BOS', 'BOS'), 0.0, [])]
         for w in data:
             stage = {}
@@ -136,13 +168,12 @@ class TnT(object):
             if w in self.word:
                 samples = self.word[w]
             for s in samples:
-                wd = log(self.wd.get((s, w))[1])-log(self.uni.get(s)[1])
+                wd = log(self.wd.get((s, w))[1]) - log(self.uni.get(s)[1])
                 for pre in now:
-                    p = pre[1]+wd+self.trans[(pre[0][0], pre[0][1], s)]
-                    if (pre[0][1], s) not in stage or p > stage[(pre[0][1],
-                                                                 s)][0]:
-                        stage[(pre[0][1], s)] = (p, pre[2]+[s])
+                    p = pre[1] + wd + self.trans[(pre[0][0], pre[0][1], s)]
+                    if (pre[0][1], s) not in stage or p > stage[(pre[0][1], s)][0]:
+                        stage[(pre[0][1], s)] = (p, pre[2] + [s])
             stage = list(map(lambda x: (x[0], x[1][0], x[1][1]), stage.items()))
             now = heapq.nlargest(self.N, stage, key=lambda x: x[1])
-        now = heapq.nlargest(1, stage, key=lambda x: x[1]+self.geteos(x[0][1]))
+        now = heapq.nlargest(1, stage, key=lambda x: x[1] + self.geteos(x[0][1]))
         return zip(data, now[0][2])
